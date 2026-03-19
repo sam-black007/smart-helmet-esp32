@@ -13,36 +13,24 @@ HardwareSerial gpsSerial(2);
 
 // ── ALCOHOL SENSOR (MQ-3) ─────────────────────────────
 #define ALCOHOL_PIN       34
-#define ALCOHOL_THRESHOLD 650   // triggers at 651+
+#define ALCOHOL_THRESHOLD 500
 
 // ── LEDs ──────────────────────────────────────────────
 #define GREEN_LED 25
-#define RED_LED   33
+#define RED_LED   26
 
-// ── 2-CHANNEL RELAY ───────────────────────────────────
-#define RELAY1_PIN 26
-#define RELAY2_PIN 27
+// ── 2 CHANNEL RELAY (ACTIVE LOW) ─────────────────────
+#define RELAY1_PIN 32
+#define RELAY2_PIN 33
+#define RELAY_ON   LOW
+#define RELAY_OFF  HIGH
+
+// ── BUZZER ────────────────────────────────────────────
+#define BUZZER_PIN 27
 
 TinyGPSPlus gps;
-String phoneNumber = "+918056273107";
-
+String phoneNumber = "+916381618970";
 bool alcoholDetected = false;
-unsigned long lastSMSTime = 0;
-#define SMS_COOLDOWN 30000  // 30 seconds cooldown between SMS
-
-// ─────────────────────────────────────────────────────
-// Relay Control (Active LOW: LOW = ON, HIGH = OFF)
-void setRelays(bool state) {
-  if (state) {
-    digitalWrite(RELAY1_PIN, LOW);
-    digitalWrite(RELAY2_PIN, LOW);
-    Serial.println("✅ Relays ON  → Vehicle ENABLED");
-  } else {
-    digitalWrite(RELAY1_PIN, HIGH);
-    digitalWrite(RELAY2_PIN, HIGH);
-    Serial.println("🔴 Relays OFF → Vehicle DISABLED");
-  }
-}
 
 // ─────────────────────────────────────────────────────
 bool waitForResponse(String expected, int timeoutMs = 5000) {
@@ -53,58 +41,38 @@ bool waitForResponse(String expected, int timeoutMs = 5000) {
       response += (char)sim800.read();
     }
     if (response.indexOf(expected) != -1) {
-      Serial.println("✓ " + response);
+      Serial.println("OK: " + response);
       return true;
     }
   }
-  Serial.println("✗ Timeout. Got: " + response);
+  Serial.println("TIMEOUT. Got: " + response);
   return false;
-}
-
-// ─────────────────────────────────────────────────────
-void initSIM800L() {
-  Serial.println("⚙ Initializing SIM800L...");
-  sim800.println("AT");              delay(1000);
-  sim800.println("ATE0");            delay(1000);
-  sim800.println("AT+CSCS=\"GSM\""); delay(1000);
-  Serial.println("⚙ SIM800L init done.");
 }
 
 // ─────────────────────────────────────────────────────
 void sendSMS(String message) {
   Serial.println("\n--- Sending SMS ---");
 
-  initSIM800L();
-
-  bool cmgfOK = false;
-  for (int i = 0; i < 5; i++) {
-    sim800.println("AT+CMGF=1");
-    if (waitForResponse("OK", 5000)) {
-      cmgfOK = true;
-      break;
-    }
-    Serial.println("⚠ CMGF retry " + String(i + 1));
-    delay(3000);
-  }
-  if (!cmgfOK) {
-    Serial.println("✗ CMGF failed after 5 retries"); return;
+  sim800.println("AT+CMGF=1");
+  if (!waitForResponse("OK", 3000)) {
+    Serial.println("CMGF failed"); return;
   }
 
   sim800.print("AT+CMGS=\"");
   sim800.print(phoneNumber);
   sim800.println("\"");
   if (!waitForResponse(">", 5000)) {
-    Serial.println("✗ No > prompt"); return;
+    Serial.println("No > prompt"); return;
   }
 
   sim800.print(message);
   delay(500);
   sim800.write(26); // CTRL+Z
 
-  if (waitForResponse("+CMGS", 15000)) {
-    Serial.println("✅ SMS Sent!");
+  if (waitForResponse("+CMGS", 10000)) {
+    Serial.println("SMS Sent!");
   } else {
-    Serial.println("✗ SMS Failed");
+    Serial.println("SMS Failed");
   }
 }
 
@@ -114,102 +82,78 @@ String getGoogleMapsLink(double lat, double lng) {
 }
 
 // ─────────────────────────────────────────────────────
-void setLED(bool alcoholState) {
-  if (alcoholState) {
-    digitalWrite(GREEN_LED, LOW);
-    digitalWrite(RED_LED,   HIGH);
+void setLED(bool alert) {
+  digitalWrite(GREEN_LED, alert ? LOW  : HIGH);
+  digitalWrite(RED_LED,   alert ? HIGH : LOW);
+}
+
+// ─────────────────────────────────────────────────────
+void setRelay(bool alert) {
+  if (alert) {
+    digitalWrite(RELAY1_PIN, RELAY_ON);
+    digitalWrite(RELAY2_PIN, RELAY_ON);
+    Serial.println("RELAY1 ON - Ignition cut");
+    Serial.println("RELAY2 ON - Fuel pump cut");
   } else {
-    digitalWrite(GREEN_LED, HIGH);
-    digitalWrite(RED_LED,   LOW);
+    digitalWrite(RELAY1_PIN, RELAY_OFF);
+    digitalWrite(RELAY2_PIN, RELAY_OFF);
+    Serial.println("RELAY1 OFF - Ignition restored");
+    Serial.println("RELAY2 OFF - Fuel pump restored");
   }
 }
 
 // ─────────────────────────────────────────────────────
-// STARTUP CHECKLIST SMS
-void sendStartupSMS() {
-  Serial.println("\n📋 Running startup checklist...");
-
-  // ── Check MQ-3 ──────────────────────────────────
-  int alcoholLevel = analogRead(ALCOHOL_PIN);
-  String mq3Status = (alcoholLevel >= 0 && alcoholLevel < 4095)
-                     ? "✅ OK (Value: " + String(alcoholLevel) + ")"
-                     : "❌ ERROR";
-  Serial.println("MQ-3 : " + mq3Status);
-
-  // ── Check Relay ──────────────────────────────────
-  // Relays already ON at this point — confirm by reading pin state
-  bool relay1OK = (digitalRead(RELAY1_PIN) == LOW);
-  bool relay2OK = (digitalRead(RELAY2_PIN) == LOW);
-  String relayStatus = (relay1OK && relay2OK)
-                       ? "✅ OK (Both ON)"
-                       : "❌ ERROR";
-  Serial.println("Relay: " + relayStatus);
-
-  // ── Check GPS ────────────────────────────────────
-  Serial.println("📡 Waiting for GPS fix (max 15s)...");
-  long gpsWait = millis();
-  while (!gps.location.isValid() && millis() - gpsWait < 15000) {
-    while (gpsSerial.available() > 0) gps.encode(gpsSerial.read());
-    delay(100);
+// Beeps N times with given on/off duration (ms)
+void buzz(int times, int onMs, int offMs) {
+  for (int i = 0; i < times; i++) {
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(onMs);
+    digitalWrite(BUZZER_PIN, LOW);
+    delay(offMs);
   }
-  String gpsStatus = "";
-  String locationLine = "";
-  if (gps.location.isValid()) {
-    gpsStatus = "✅ OK (Sats: " + String(gps.satellites.value()) + ")";
-    locationLine = "\nLocation: " + getGoogleMapsLink(gps.location.lat(), gps.location.lng());
-  } else {
-    gpsStatus = "⚠ No Fix Yet";
-    locationLine = "\nLocation: Unavailable";
-  }
-  Serial.println("GPS  : " + gpsStatus);
+}
 
-  // ── Check SIM800L ────────────────────────────────
-  sim800.println("AT+CREG?");
-  String simStatus = waitForResponse("+CREG: 0,1", 3000)
-                     ? "✅ OK (Network Registered)"
-                     : "⚠ Check SIM/Network";
-  Serial.println("SIM  : " + simStatus);
+// ─────────────────────────────────────────────────────
+// 3 second warning beeps before relay cuts power
+void buzzerWarning() {
+  Serial.println("BUZZER WARNING - 3 beeps before cutoff...");
+  buzz(3, 500, 500); // 3 beeps, 0.5s on, 0.5s off = 3 seconds total
+}
 
-  // ── Build and send checklist SMS ─────────────────
-  String sms  = "=== SMART HELMET ONLINE ===\n\n";
-  sms        += "SENSOR CHECKLIST:\n";
-  sms        += "MQ-3 Sensor : " + mq3Status + "\n";
-  sms        += "GPS Module  : " + gpsStatus + "\n";
-  sms        += "SIM800L GSM : " + simStatus + "\n";
-  sms        += "Relay Module: " + relayStatus + "\n";
-  sms        += locationLine;
-
-  Serial.println("\n📤 Sending startup SMS...");
-  sendSMS(sms);
-  // lastSMSTime NOT set here — startup SMS does not block alcohol alert
+// Continuous fast beep while alcohol is detected
+void buzzerAlert() {
+  buzz(1, 100, 100); // single short beep — called repeatedly in loop
 }
 
 // ─────────────────────────────────────────────────────
 void triggerAlcoholAlert() {
-  Serial.println("\n🚨 ALCOHOL DETECTED!");
+  Serial.println("\nALCOHOL DETECTED!");
 
-  // 1. Red LED ON, Green OFF
+  // 1. Red ON, Green OFF
   setLED(true);
 
-  // 2. STOP both relays → kill vehicle immediately
-  setRelays(false);
+  // 2. Warning beeps BEFORE relay cuts power
+  buzzerWarning();
 
-  // 3. Wait for GPS fix
-  Serial.println("📡 Getting GPS location...");
+  // 3. Trigger both relays AFTER warning
+  setRelay(true);
+
+  // 4. Wait up to 10s for GPS fix
+  Serial.println("Getting GPS location...");
   long gpsWait = millis();
   while (!gps.location.isValid() && millis() - gpsWait < 10000) {
     while (gpsSerial.available() > 0) gps.encode(gpsSerial.read());
     delay(100);
   }
 
-  // 4. Build SMS
+  // 5. Build SMS
   String sms = "";
   if (gps.location.isValid()) {
     double lat  = gps.location.lat();
     double lng  = gps.location.lng();
     String link = getGoogleMapsLink(lat, lng);
 
-    sms  = "🚨 ALCOHOL ALERT!\n";
+    sms  = "ALCOHOL ALERT!\n";
     sms += "Driver has consumed alcohol.\n";
     sms += "Vehicle has been stopped.\n\n";
     sms += "Last Location:\n";
@@ -217,22 +161,18 @@ void triggerAlcoholAlert() {
     sms += "Lng: " + String(lng, 6) + "\n";
     sms += link;
 
-    Serial.println("📍 " + link);
+    Serial.println("Location: " + link);
+
   } else {
-    sms  = "🚨 ALCOHOL ALERT!\n";
+    sms  = "ALCOHOL ALERT!\n";
     sms += "Driver has consumed alcohol.\n";
     sms += "Vehicle has been stopped.\n\n";
     sms += "GPS location unavailable.";
-    Serial.println("⚠ No GPS fix.");
+    Serial.println("No GPS fix. Sending without location.");
   }
 
-  // 5. Send SMS with cooldown
-  if (millis() - lastSMSTime > SMS_COOLDOWN) {
-    sendSMS(sms);
-    lastSMSTime = millis();
-  } else {
-    Serial.println("⚠ SMS cooldown active, skipping duplicate alert...");
-  }
+  // 6. Send SMS
+  sendSMS(sms);
 }
 
 // ─────────────────────────────────────────────────────
@@ -240,32 +180,37 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  // LED setup
+  // ── LED Init ──────────────────────────────────────
   pinMode(GREEN_LED, OUTPUT);
   pinMode(RED_LED,   OUTPUT);
   setLED(false);
-  Serial.println("✅ GREEN LED ON → System Safe");
+  Serial.println("GREEN ON - System Safe");
 
-  // Relay setup — both ON at boot
+  // ── Relay Init ────────────────────────────────────
   pinMode(RELAY1_PIN, OUTPUT);
   pinMode(RELAY2_PIN, OUTPUT);
-  setRelays(true);
+  setRelay(false);
+  Serial.println("RELAYS OFF - Vehicle Running");
 
-  // SIM800L init
+  // ── Buzzer Init ───────────────────────────────────
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+  buzz(2, 100, 100); // 2 quick beeps = system ready
+  Serial.println("BUZZER Ready");
+
+  // ── SIM800L Init ──────────────────────────────────
   sim800.begin(9600, SERIAL_8N1, SIM800_RX, SIM800_TX);
-  delay(8000);
+  delay(5000);
   Serial.println("SIM800L Ready");
-  initSIM800L();
-  sim800.println("AT+CMGF=1"); delay(1000);
+  sim800.println("AT");        delay(500);
+  sim800.println("ATE0");      delay(500);
+  sim800.println("AT+CMGF=1"); delay(500);
 
-  // GPS init
+  // ── GPS Init ──────────────────────────────────────
   gpsSerial.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
   Serial.println("GPS Started...");
 
-  // Send startup checklist SMS
-  sendStartupSMS();
-
-  Serial.println("\n✅ System Ready. Monitoring alcohol...");
+  Serial.println("\nSystem Ready. Monitoring alcohol...\n");
 }
 
 // ─────────────────────────────────────────────────────
@@ -276,7 +221,7 @@ void loop() {
     gps.encode(gpsSerial.read());
   }
 
-  // ── Read Alcohol Sensor ───────────────────────────
+  // ── Read Alcohol Sensor ────────────────────────────
   int alcoholLevel = analogRead(ALCOHOL_PIN);
 
   // ── Alcohol Detected ──────────────────────────────
@@ -285,20 +230,29 @@ void loop() {
     triggerAlcoholAlert();
   }
 
-  // ── Alcohol Cleared ───────────────────────────────
+  // ── Keep buzzing while alcohol still present ──────
+  if (alcoholDetected) {
+    buzzerAlert();
+  }
+
+  // ── Alcohol Cleared ────────────────────────────────
   if (alcoholLevel < ALCOHOL_THRESHOLD && alcoholDetected) {
     alcoholDetected = false;
     setLED(false);
-    setRelays(true);
-    Serial.println("✅ Alcohol cleared → GREEN LED ON, Vehicle RE-ENABLED");
+    setRelay(false);
+    digitalWrite(BUZZER_PIN, LOW);  // Buzzer OFF
+    buzz(2, 100, 100);              // 2 beeps = system cleared
+    Serial.println("Alcohol cleared - System Safe - Vehicle Restored");
   }
 
-  // ── Status every 3s ───────────────────────────────
+  // ── Serial Status every 3s ────────────────────────
   static unsigned long lastPrint = 0;
   if (millis() - lastPrint > 3000) {
     lastPrint = millis();
-    Serial.print("🍺 Alcohol: "); Serial.print(alcoholLevel);
-    Serial.print(" | Sats: ");    Serial.print(gps.satellites.value());
-    Serial.print(" | Status: ");  Serial.println(alcoholDetected ? "🔴 ALERT" : "🟢 SAFE");
+    Serial.print("Alcohol: ");  Serial.print(alcoholLevel);
+    Serial.print(" | Sats: ");  Serial.print(gps.satellites.value());
+    Serial.print(" | GPS: ");   Serial.print(gps.location.isValid() ? "Fix OK" : "Waiting...");
+    Serial.print(" | Relay: "); Serial.print(alcoholDetected ? "ON" : "OFF");
+    Serial.print(" | Status: ");Serial.println(alcoholDetected ? "ALERT" : "SAFE");
   }
 }

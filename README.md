@@ -9,7 +9,8 @@ A comprehensive ESP32-based smart helmet system that detects alcohol consumption
 - **Alcohol Detection** - MQ-3 sensor detects driver alcohol levels
 - **GPS Tracking** - NEO-6M GPS module for real-time location tracking
 - **SMS Alerts** - SIM800L GSM module sends emergency SMS with location
-- **Vehicle Control** - 2-channel relay controls vehicle ignition
+- **Vehicle Control** - 2-channel relay controls vehicle ignition and fuel pump
+- **Audio Alert** - Buzzer provides audible warnings
 - **LED Indicators** - Visual feedback for system status
 
 ## Hardware Components
@@ -20,7 +21,21 @@ A comprehensive ESP32-based smart helmet system that detects alcohol consumption
 | Alcohol Sensor | MQ-3 | Breath alcohol detection |
 | GPS Module | NEO-6M | Location tracking |
 | GSM Module | SIM800L | SMS communication |
-| Relay Module | 2-Channel | Vehicle control |
+| Relay Module | 2-Channel | Vehicle ignition & fuel pump control |
+| Buzzer | Active/Passive | Audio alert warnings |
+
+## Pin Reference
+
+| Component | Function | GPIO |
+|-----------|----------|------|
+| MQ-3 AO | Alcohol level | GPIO34 |
+| GPS | RX / TX | GPIO16 / 17 |
+| GSM | TX / RX | GPIO12 / 13 |
+| Green LED + 1kΩ | Safe indicator | GPIO25 |
+| Red LED + 1kΩ | Alert indicator | GPIO26 |
+| Relay 1 | Ignition cut | GPIO32 |
+| Relay 2 | Fuel pump cut | GPIO33 |
+| Buzzer | Audio alert | GPIO27 |
 
 ## Hardware Setup
 
@@ -31,11 +46,30 @@ ESP32 Pinout:
 ├── GPIO 16 (TX) ←→ NEO-6M RX
 ├── GPIO 17 (RX) ←→ NEO-6M TX
 ├── GPIO 25      → Green LED (+)
-├── GPIO 26      → Relay 1 Signal
-├── GPIO 27      → Relay 2 Signal
-├── GPIO 33      → Red LED (+)
+├── GPIO 26      → Red LED (+)
+├── GPIO 27      → Buzzer (+)
+├── GPIO 32      → Relay 1 Signal
+├── GPIO 33      → Relay 2 Signal
 └── GPIO 34      → MQ-3 Analog Output
 ```
+
+## Buzzer Behaviour
+
+| Event | Buzzer Pattern |
+|-------|---------------|
+| System startup | 2 short beeps — "ready" |
+| Alcohol detected (warning) | 3 long beeps — "warning, cutting power" |
+| While alcohol present | Continuous fast beeping |
+| Alcohol cleared | 2 short beeps — "safe" |
+
+## System Behaviour
+
+| Situation | Green | Red | Relay 1 & 2 | Buzzer | SMS |
+|-----------|-------|-----|-------------|--------|-----|
+| Startup | ON | OFF | OFF | 2 beeps | — |
+| Normal driving | ON | OFF | OFF | Silent | — |
+| Alcohol detected | OFF | ON | ON | 3 warn + continuous | Sent |
+| Alcohol cleared | ON | OFF | OFF | 2 beeps | — |
 
 ## Installation
 
@@ -49,37 +83,27 @@ ESP32 Pinout:
 
 Edit these variables in the code:
 ```cpp
-String phoneNumber = "+918056273107";  // Emergency contact
-#define ALCOHOL_THRESHOLD 650;          // Sensitivity adjustment
+String phoneNumber = "+916381618970";  // Emergency contact
+#define ALCOHOL_THRESHOLD 500;         // Sensitivity adjustment
 ```
 
 ## How It Works
 
-1. **Startup**: System sends a checklist SMS with all sensor statuses
+1. **Startup**: System beeps twice and initializes all components
 2. **Monitoring**: Continuously reads MQ-3 alcohol sensor
 3. **Detection**: If alcohol detected above threshold:
    - Turns ON red LED
-   - Disables vehicle (relays OFF)
+   - 3-second warning beeps
+   - Disables vehicle (relays ON - cuts ignition & fuel)
+   - Continuous alert beeping
    - Sends SMS with GPS location to emergency contact
-4. **Reset**: When alcohol clears, re-enables vehicle
+4. **Reset**: When alcohol clears, re-enables vehicle and plays safe beeps
 
 ## SMS Messages
 
-### Startup Checklist
-```
-=== SMART HELMET ONLINE ===
-
-SENSOR CHECKLIST:
-MQ-3 Sensor : ✅ OK
-GPS Module  : ✅ OK
-SIM800L GSM : ✅ OK
-Relay Module: ✅ OK
-Location: [Google Maps Link]
-```
-
 ### Alcohol Alert
 ```
-🚨 ALCOHOL ALERT!
+ALCOHOL ALERT!
 Driver has consumed alcohol.
 Vehicle has been stopped.
 
