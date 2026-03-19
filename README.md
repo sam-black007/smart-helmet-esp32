@@ -24,6 +24,10 @@ A comprehensive ESP32-based smart helmet system that detects alcohol consumption
 | Relay Module | 2-Channel | Vehicle ignition & fuel pump control |
 | Buzzer | Active/Passive | Audio alert warnings |
 
+## Hardware Image
+
+![Smart Helmet Hardware](hardware.jpg)
+
 ## Complete Final Pin Reference
 
 | Component | Function | GPIO |
