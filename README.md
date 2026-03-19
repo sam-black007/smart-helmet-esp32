@@ -24,7 +24,7 @@ A comprehensive ESP32-based smart helmet system that detects alcohol consumption
 | Relay Module | 2-Channel | Vehicle ignition & fuel pump control |
 | Buzzer | Active/Passive | Audio alert warnings |
 
-## Pin Reference
+## Complete Final Pin Reference
 
 | Component | Function | GPIO |
 |-----------|----------|------|
@@ -37,22 +37,6 @@ A comprehensive ESP32-based smart helmet system that detects alcohol consumption
 | Relay 2 | Fuel pump cut | GPIO33 |
 | Buzzer | Audio alert | GPIO27 |
 
-## Hardware Setup
-
-```
-ESP32 Pinout:
-├── GPIO 12 (TX) ←→ SIM800L RX
-├── GPIO 13 (RX) ←→ SIM800L TX
-├── GPIO 16 (TX) ←→ NEO-6M RX
-├── GPIO 17 (RX) ←→ NEO-6M TX
-├── GPIO 25      → Green LED (+)
-├── GPIO 26      → Red LED (+)
-├── GPIO 27      → Buzzer (+)
-├── GPIO 32      → Relay 1 Signal
-├── GPIO 33      → Relay 2 Signal
-└── GPIO 34      → MQ-3 Analog Output
-```
-
 ## Buzzer Behaviour
 
 | Event | Buzzer Pattern |
@@ -62,7 +46,7 @@ ESP32 Pinout:
 | While alcohol present | Continuous fast beeping |
 | Alcohol cleared | 2 short beeps — "safe" |
 
-## System Behaviour
+## Complete System Behaviour
 
 | Situation | Green | Red | Relay 1 & 2 | Buzzer | SMS |
 |-----------|-------|-----|-------------|--------|-----|
