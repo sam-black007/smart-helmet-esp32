@@ -1,6 +1,6 @@
 # Smart Helmet System
 
-![Smart Helmet Banner](https://image.pollinations.ai/prompt/Smart%20helmet%20ESP32%20IoT%20device%20with%20GPS%20GSM%20sensors%20alcohol%20detection%20circuit%20dark%20blueprint%20style?width=1280&height=640&nologo=true)
+![Smart Helmet Banner](
 
 A comprehensive ESP32-based smart helmet system that detects alcohol consumption, tracks GPS location, and sends SMS alerts to emergency contacts.
 
